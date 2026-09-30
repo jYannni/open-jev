@@ -30,7 +30,7 @@ import pyarrow.parquet as pq
 from huggingface_hub import HfFileSystem
 
 PARQUET = "datasets/Lichess/chess-puzzles/data/train-00000-of-00003.parquet"
-COLUMNS = ["PuzzleId", "FEN", "Moves", "Rating", "Popularity"]
+COLUMNS = ["PuzzleId", "FEN", "Moves", "Rating", "Popularity", "GameUrl"]
 
 
 def fetch_puzzles(row_group: int = 0) -> list[dict]:
@@ -81,6 +81,7 @@ def puzzle_examples(row: dict, max_per_puzzle: int) -> list[dict]:
                 "prompt": make_prompt(board),
                 "completion": f" {moves[i]}",
                 "puzzle_id": row["PuzzleId"],
+                "game_url": row.get("GameUrl"),
                 "rating": row["Rating"],
                 "ply": (i - 1) // 2,
             }

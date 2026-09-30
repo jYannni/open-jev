@@ -2,13 +2,15 @@
 import hashlib
 import json
 from pathlib import Path
+from collections import Counter
+from .groups import game_identity, identities
 
 
 def fingerprint(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def read_split(path):
+def read_split(path, strict=False):
     rows = []
     with Path(path).open() as f:
         for line, raw in enumerate(f, 1):
@@ -21,6 +23,8 @@ def read_split(path):
                 target = row['completion'].strip()
                 if len(fen.split()) != 6 or not moves or len(set(moves)) != len(moves) or target not in moves:
                     raise ValueError('invalid FEN fields, candidate list, or target')
+                if strict:
+                    fen = validate_board(fen, moves)
                 rows.append(dict(row, id=f'{Path(path).stem}:{line}', fen=fen,
                                  position=' '.join(fen.split()[:4]), candidates=moves,
                                  label=moves.index(target)))
@@ -31,18 +35,31 @@ def read_split(path):
     return rows
 
 
+def validate_board(fen, moves):
+    try:
+        import chess
+    except ImportError as exc:
+        raise RuntimeError("Strict chess validation requires the finetune extra (python-chess)") from exc
+    board = chess.Board(fen)
+    if not board.is_valid():
+        raise ValueError("invalid chess position")
+    if set(moves) != {m.uci() for m in board.legal_moves}:
+        raise ValueError("candidate list must contain exactly all legal moves")
+    # Normalize non-actionable en-passant squares for position identity.
+    return board.fen(en_passant='legal')
+
+
 def audit(splits):
-    overlaps = []
-    for field in ('position', 'puzzle_id', 'game_id', 'game_url'):
-        seen = {}
-        for split, rows in splits.items():
-            values = {str(r[field]) for r in rows if r.get(field) is not None}
-            for value in values:
-                if value in seen:
-                    overlaps.append(dict(field=field, splits=[seen[value], split], value=value))
-                else:
-                    seen[value] = split
+    seen, overlaps, duplicates = {}, [], {}
+    for split, rows in splits.items():
+        counts = Counter(r['position'] for r in rows)
+        duplicates[split] = sum(n - 1 for n in counts.values() if n > 1)
+        for key in sorted({key for r in rows for key in identities(r)}):
+            if key in seen:
+                overlaps.append(dict(field=key[0], splits=[seen[key], split], value=key[1]))
+            else:
+                seen[key] = split
     return dict(counts={k: len(v) for k, v in splits.items()}, overlaps=overlaps,
-                game_metadata_complete=all(r.get('game_id') or r.get('game_url')
-                                           for rows in splits.values() for r in rows),
-                position_policy='First four FEN fields; clocks ignored. Does not detect transpositions with differing en-passant fields or near-duplicates.')
+                duplicate_positions_within_split=duplicates,
+                game_metadata_complete=all(game_identity(r) for rows in splits.values() for r in rows),
+                position_policy='First four FEN fields; clocks ignored. Strict mode additionally normalizes en-passant legality. Near-duplicates and pretraining contamination are not detected.')
