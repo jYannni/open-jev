@@ -23,6 +23,10 @@ Full-resolution recording: [docs/media/doom-recording.mov](docs/media/doom-recor
 
 ## Setup
 
+For use inside a Python application or notebook, install this checkout with
+`python -m pip install .` (Python 3.12+). See the [Python package guide](docs/python-package.md)
+for decision inference, feature extraction, training, and wheel installation.
+
 ### Windows and Linux
 
 Install Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/), then run these commands from the repository in PowerShell or a Linux shell:
@@ -172,6 +176,16 @@ zero-shot vs the numbers TypeSafe publishes for Jev:
 Same routing decision, but Gemma is over-confident and disagrees on the two judgement calls. Zero-shot
 probabilities are softmaxed next-token likelihoods, not calibrated judgements. Closing the gap means
 labelled data and a trained head (below).
+
+## Native candidate-decision model
+
+`openjev decision` trains a shared candidate-scoring head on frozen features and
+reloads it for raw state/question/candidate requests. It includes versioned task
+validation, feature and artifact fingerprints, held-out evaluation against
+continuation scoring, and candidate-order/repeated-request checks.
+
+See [the native decision-head guide](docs/decision-head.md) for data formats and
+commands. This training/inference path currently uses MLX on Apple silicon.
 
 ## Training a head (per-task, on frozen Gemma features)
 

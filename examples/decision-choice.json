@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "example-request",
+  "state": {"message": "My parcel arrived with a broken item. I need a replacement."},
+  "question": "Which department should handle this request?",
+  "candidates": [
+    {"id": "returns", "text": "Returns, damaged items, and replacements"},
+    {"id": "billing", "text": "Charges, payments, and invoices"},
+    {"id": "account", "text": "Login and account access"}
+  ]
+}

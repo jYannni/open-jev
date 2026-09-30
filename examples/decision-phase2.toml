@@ -1,0 +1,34 @@
+# Paths are relative to this file. Use four disjoint native choice JSONL files.
+schema_version = 1
+model = "../models/gemma-3-4b-it"
+out = "../runs/decision-phase2"
+
+[datasets]
+train = "../data/decision/train.jsonl"
+validation = "../data/decision/validation.jsonl"
+calibration = "../data/decision/calibration.jsonl"
+test = "../data/decision/test.jsonl"
+
+# Optional [caches] table: supply train/validation/calibration/test .npz paths
+# together. Content hashes, labels, split roles, and feature contracts are checked.
+
+[training]
+brier_weights = [0.0, 0.1, 1.0]
+rank = 256
+epochs = 8
+batch_size = 64
+lr = 0.0001
+seed = 7
+selection = "nll"
+
+[calibration]
+temperature_bounds = [0.05, 20.0]
+
+[evaluation]
+bootstrap_samples = 1000
+bootstrap_seed = 7
+
+[features]
+feature_batch_size = 8
+context_tokens = 4096
+candidate_tokens = 256

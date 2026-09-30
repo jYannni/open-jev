@@ -271,6 +271,9 @@ def main(argv: list[str] | None = None) -> None:
     v.add_argument("--port", type=int, default=8000)
     v.set_defaults(fn=cmd_serve)
 
+    from .decision_cli import register
+    register(sub)
+
     args = p.parse_args(argv)
     if len(getattr(args, "option", []) or []) == 1:
         p.error("--option must be given at least twice")
