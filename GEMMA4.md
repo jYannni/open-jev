@@ -20,11 +20,12 @@ Both use vocab 262144, BOS id 2, final-logit soft-capping 30, and tied embedding
 `mlx-community/gemma-4-12B-it-OptiQ-4bit` has the same `gemma4_unified` type but a different
 chat template (not reviewed here).
 
-**mlx-lm version.** `gemma4` loads with mlx-lm 0.31.x, the version in `uv.lock`. `gemma4_unified`
-(the 12B) is only mapped onto the `gemma4` implementation from **mlx-lm 0.32.0**; older versions
-fail at load with an unsupported model type. PyTorch: transformers 5.17 (locked) maps both types
-to their native `*ForConditionalGeneration` wrappers through `AutoModelForCausalLM`, so
-`torch_backend.py` needed no change.
+**mlx-lm version.** `gemma4` loads from mlx-lm 0.31, but `gemma4_unified` (the 12B) is only
+mapped onto the `gemma4` implementation from **mlx-lm 0.32.0**; older versions fail at load with an
+unsupported model type. `pyproject.toml` now requires `mlx-lm>=0.32.0` and `uv.lock` pins 0.32.0
+(previously 0.31.3; nothing else in the lock moved). Run `uv sync` on the Mac mini to pick it up. PyTorch: transformers 5.17
+(locked) maps both types to their native `*ForConditionalGeneration` wrappers through
+`AutoModelForCausalLM`, so `torch_backend.py` needed no change.
 
 ## Code changes
 
@@ -37,6 +38,7 @@ to their native `*ForConditionalGeneration` wrappers through `AutoModelForCausal
   `make_cache()` has one entry per layer, so nothing changes there.
 - **Chat template.** `context_ids(chat=True)` passes `enable_thinking=False`. Templates that
   don't read the flag (Gemma 3) ignore it.
+- **Dependency.** `mlx-lm>=0.32.0` (see above).
 - **Feature norms.** `train` prints and records (`head.json` → `feature_norms`) the mean L2
   norm of context-token and option features. See below.
 
