@@ -67,6 +67,8 @@ def train(train_path: str, val_path: str, out: str, rank: int = 256, epochs: int
     head = AttentionHead(tr.meta["hidden"], rank)
     n_params = sum(v.size for _, v in tree_flatten(head.parameters()))
     print(f"train {len(tr)} / val {len(va)} examples, hidden {tr.meta['hidden']}, rank {rank}, {n_params / 1e6:.2f}M head params", flush=True)
+    norms = tr.norms()
+    print(f"mean feature norms: context {norms['context']}, option {norms['option']}", flush=True)
     opt = optim.AdamW(learning_rate=lr, weight_decay=weight_decay)
     step = nn.value_and_grad(head, lambda h, *batch: loss_fn(h, *batch, brier_weight=brier_weight))
     best, best_state, history = -float('inf'), None, []
@@ -98,5 +100,5 @@ def train(train_path: str, val_path: str, out: str, rank: int = 256, epochs: int
                     "batch_size": batch_size, "seed": seed, "best_val_top1": selected_top1,
                     "brier_weight": brier_weight, "brier_convention": "sum_over_valid_candidates",
                     "selection": selection,
-                    "features_meta": tr.meta, "history": history})
+                    "features_meta": tr.meta, "feature_norms": norms, "history": history})
     return {"best_val_top1": selected_top1, "checkpoint": out}

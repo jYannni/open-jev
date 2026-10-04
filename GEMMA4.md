@@ -1,0 +1,104 @@
+# Gemma 4 support
+
+open-jev runs on Gemma 4 instruct models through the existing `--model <path|repo>` option.
+`DEFAULT_MODEL`, the Makefile defaults and Gemma 3 behaviour are unchanged.
+
+```sh
+openjev serve --model mlx-community/gemma-4-e4b-it-4bit
+openjev serve --model mlx-community/gemma-4-12B-it-qat-4bit
+make serve MODEL=mlx-community/gemma-4-e4b-it-4bit
+```
+
+## Checkpoints this was written against
+
+| Model | MLX repo (ungated) | `model_type` | Layout |
+|---|---|---|---|
+| Gemma 4 E4B | `mlx-community/gemma-4-e4b-it-4bit` (also `-8bit`) | `gemma4` | multimodal wrapper; text: hidden 2560, 42 layers, last 18 layers share K/V, per-layer input embeddings |
+| Gemma 4 12B | `mlx-community/gemma-4-12B-it-qat-4bit` | `gemma4_unified` | encoder-free multimodal wrapper; text: hidden 3840, 48 layers, no K/V sharing, K = V on full-attention layers |
+
+Both use vocab 262144, BOS id 2, final-logit soft-capping 30, and tied embeddings.
+`mlx-community/gemma-4-12B-it-OptiQ-4bit` has the same `gemma4_unified` type but a different
+chat template (not reviewed here).
+
+**mlx-lm version.** `gemma4` loads with mlx-lm 0.31.x, the version in `uv.lock`. `gemma4_unified`
+(the 12B) is only mapped onto the `gemma4` implementation from **mlx-lm 0.32.0**; older versions
+fail at load with an unsupported model type. PyTorch: transformers 5.17 (locked) maps both types
+to their native `*ForConditionalGeneration` wrappers through `AutoModelForCausalLM`, so
+`torch_backend.py` needed no change.
+
+## Code changes
+
+- **K/V cache sizing (MLX).** mlx-lm's Gemma 4 model expects one cache per layer that *owns*
+  K/V (`model.make_cache()`) and pads the list with `None` for the K/V-sharing layers. open-jev
+  used to build one `KVCache` per layer. On E4B that made the sharing layers append the shared
+  keys a second time, and the first cached call failed with a shape mismatch.
+  `OptionScorer.new_cache()` now sizes the list from `make_cache()`. It still uses plain
+  `KVCache` objects, as before, so the prefix-expansion code is unchanged. For Gemma 3,
+  `make_cache()` has one entry per layer, so nothing changes there.
+- **Chat template.** `context_ids(chat=True)` passes `enable_thinking=False`. Templates that
+  don't read the flag (Gemma 3) ignore it.
+- **Feature norms.** `train` prints and records (`head.json` → `feature_norms`) the mean L2
+  norm of context-token and option features. See below.
+
+## Template details
+
+The benchmark path (`systemone`, `norm="sum"`) calls `score(..., chat=False)`: the context is
+encoded with the tokenizer's own BOS and no chat template, so the template does not affect it.
+
+With `chat=True` the Gemma 4 templates render one user turn as:
+
+```
+<bos><|turn>user\n{context, trimmed}<turn|>\n<|turn>model\n                              (E4B)
+<bos><|turn>user\n{context, trimmed}<turn|>\n<|turn>model\n<|channel>thought\n<channel|>  (12B qat)
+```
+
+The 12B template appends an empty thought channel whenever thinking is off, so options are
+scored as the visible answer after it. That is the template's intended non-thinking reply
+prefix. The template emits `<bos>` as text, which the tokenizer maps to id 2; `context_ids`
+encodes with `add_special_tokens=False` and only prepends BOS when it is missing, so BOS is
+never doubled (covered by a test). Options are encoded without special tokens, as before.
+
+## Frozen-feature head (Route A)
+
+`FeatureExtractor` takes `model.language_model.model` (`Gemma4TextModel`: embeddings, per-layer
+inputs, decoder layers, final norm, no LM head), the same attribute path as Gemma 3. The hidden
+size comes from `language_model.args.hidden_size`: 2560 for E4B and 3840 for 12B. Heads trained on
+Gemma 3 (2560) features are not reusable, including on E4B: the dimension matches but the
+feature space differs. Retrain.
+
+**Learning rate.** The 5e-4 default (and `decision` 1e-4) was tuned on Gemma 3 4B features with
+norms of about 115. I could not measure Gemma 4 norms without weights. The first `openjev train` run prints
+`mean feature norms: ...`. AdamW's step size does not depend on the gradient scale, so the
+head's effective change scales with the input norm. As a starting point, scale the learning rate
+by `115 / measured_norm` and confirm on validation. This rule of thumb has not been verified on Gemma 4.
+
+## Benchmark contract
+
+`OptionScorer`, `openjev.systemone.SystemOneRequest` and `system_one` keep their names and
+signatures. `OptionScorer.new_cache()` is a new public helper.
+
+## Tests
+
+`tests/test_gemma4.py` builds tiny random Gemma 4 models in two shapes, E-series (K/V
+sharing, per-layer inputs) and unified (K = V, no sharing). It runs the same checks as the Gemma 3
+tests:
+
+- prefix-cached vs naive scores across batch sizes;
+- norms and repeated calls;
+- chat and separator, with exactly one BOS;
+- loading both multimodal wrappers through `TorchBackend`;
+- on MLX: cache length, features vs an uncached forward pass, and Route A extract plus a one-epoch train.
+
+The MLX tests run wherever mlx-lm imports. They were run with `mlx[cpu]` 0.32.3 and mlx-lm
+0.32.0 on Linux. The PyTorch tests ran with the locked torch/transformers.
+
+## Not verified without weights
+
+- Real-checkpoint loading of either MLX repo, including quantised weights and the
+  `sanitize()` paths for audio and vision weights.
+- Output probabilities on `examples/systemone-quickstart.json`.
+- Feature norms and a working learning rate for Route A.
+- Numerical agreement between MLX 4-bit and PyTorch bf16 on real weights.
+- Gemma 4's 512/1024-token sliding windows with contexts longer than the window, on real
+  weights. Plain `KVCache` plus the windowed mask is the same mechanism Gemma 3 uses, and it is
+  covered by the tiny-model tests with an 8-token window.

@@ -1,4 +1,4 @@
-"""Zero-shot option scoring with Gemma 3 via MLX or PyTorch (Route B in docs/design/one-pass-option-scoring.md).
+"""Zero-shot option scoring with Gemma 3 or Gemma 4 via MLX or PyTorch (Route B in docs/design/one-pass-option-scoring.md).
 
 The context is prefilled once. Its KV cache is then expanded across the batch
 dimension so every option is scored in one padded forward pass that shares the
@@ -47,8 +47,9 @@ class OptionScorer:
         backend: auto selects MLX on Apple silicon, PyTorch elsewhere.
         device: PyTorch device (auto, cpu, cuda, cuda:N, mps).
         batch_size: maximum number of options scored in one forward pass.
-        chat: wrap the context in Gemma's chat template (user turn, generation
-            prompt appended) so options are scored as the start of the reply.
+        chat: wrap the context in the model's chat template (user turn, generation
+            prompt appended, thinking disabled) so options are scored as the start
+            of the reply.
         sep: literal string placed between context and each option (ignored
             when ``chat`` is set, since the template already ends the turn).
     """
@@ -101,6 +102,8 @@ class OptionScorer:
                 [{"role": "user", "content": context}],
                 tokenize=False,
                 add_generation_prompt=True,
+                # Gemma 4 templates read this flag; templates without it ignore it.
+                enable_thinking=False,
             )
             ids = self.tok.encode(text, add_special_tokens=False)
             if self.bos_id is not None and ids[:1] != [self.bos_id]:
@@ -118,12 +121,22 @@ class OptionScorer:
         return ids
 
     # --------------------------------------------------------------- prefill
+    def new_cache(self) -> list[KVCache]:
+        """One plain KVCache per layer that owns K/V.
+
+        Gemma 4 E-series models share K/V across their last layers; mlx-lm's
+        ``make_cache`` returns caches only for the layers that compute their own,
+        and the model pads the list with None for the sharing layers.
+        """
+        n = len(self.model.make_cache()) if hasattr(self.model, "make_cache") else len(self.model.layers)
+        return [KVCache() for _ in range(n)]
+
     def _prefill(self, ids: list[int]) -> tuple[list[KVCache], mx.array]:
         if not ids:
             raise ValueError("context must contain tokens (or the tokenizer must define BOS)")
         if self._engine is not None:
             return self._engine.prefill(ids)
-        cache = [KVCache() for _ in self.model.layers]
+        cache = self.new_cache()
         logits = self.model(mx.array(ids)[None], cache=cache)
         last = logits[0, -1]
         mx.eval(last, *[c.keys for c in cache], *[c.values for c in cache])
