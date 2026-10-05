@@ -90,7 +90,8 @@ are badly distorted:
 | "The capital of France is" → " Paris" (`check`) | −0.025 | −16.25 | — |
 | "What is the capital of France? Answer in one word." → "Paris" | — | −24.87 | −0.000 |
 
-Raw quickstart answers from the 12B were wrong: department `billing` at 0.997, frustration mostly
+With `serve --chat` the 12B quickstart answers are: department `technical` (0.9997),
+frustration 2.00 ("Furious", 0.998), is_urgent 1.00. Raw quickstart answers from the 12B were wrong: department `billing` at 0.997, frustration mostly
 "Calm and factual". This matches the OptiQ 12B model card, which warns that cloze-style
 (log-likelihood) scoring underscores this reasoning model. The 12B is benchmarked with
 `OptionScorer(model, chat=True)` or `serve --chat`. Its cached-vs-naive drift (`check`, raw
@@ -162,7 +163,6 @@ drift matches Gemma 3's.
 
 ## Not verified without weights
 
-- 12B quickstart output with `--chat`.
 - Feature norms and a working learning rate for Route A.
 - Numerical agreement between MLX 4-bit and PyTorch bf16 on real weights.
 - Gemma 4's 512/1024-token sliding windows with contexts longer than the window, on real
