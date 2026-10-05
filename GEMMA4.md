@@ -126,7 +126,9 @@ On CPU, in float32 and bfloat16, cached and naive agree exactly for tiny Gemma 4
 unified) and Gemma 3 models with a 1602-token context past a 64-token sliding window. The
 difference is therefore attributed to Metal kernel rounding in bfloat16, not to the cache logic.
 That attribution is inferred, not proven on Metal. Gemma 4's drift at long context is about 3×
-Gemma 3's in relative terms, and its option scores are about 2.4× larger. Expect `check` to fail
+Gemma 3's in relative terms, and its option scores are about 2.4× larger. E4B runs at 401 tokens (inside its 512-token window) and 701 tokens gave 1.55 (0.58%) and 1.35
+(0.47%), with identical rankings. The drift is roughly constant per token, so it does not come
+from the sliding window. Expect `check` to fail
 its default `--tol 0.5` on Gemma 4 for long contexts. For short labels, as in `systemone`, the
 drift matches Gemma 3's.
 
