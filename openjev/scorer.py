@@ -7,6 +7,7 @@ language model assigns to the option tokens given the context.
 """
 from __future__ import annotations
 
+import copy
 import math
 import time
 from dataclasses import dataclass, asdict
@@ -122,14 +123,15 @@ class OptionScorer:
 
     # --------------------------------------------------------------- prefill
     def new_cache(self) -> list[KVCache]:
-        """One plain KVCache per layer that owns K/V.
+        """The model's own prompt cache: one entry per layer that owns K/V.
 
-        Gemma 4 E-series models share K/V across their last layers; mlx-lm's
-        ``make_cache`` returns caches only for the layers that compute their own,
-        and the model pads the list with None for the sharing layers.
+        mlx-lm's ``make_cache`` returns a ``RotatingKVCache`` for sliding-window layers,
+        which keeps memory bounded by the window, and leaves out the K/V-sharing layers
+        of Gemma 4 E-series models (the model pads the list with None for them).
         """
-        n = len(self.model.make_cache()) if hasattr(self.model, "make_cache") else len(self.model.layers)
-        return [KVCache() for _ in range(n)]
+        if hasattr(self.model, "make_cache"):
+            return self.model.make_cache()
+        return [KVCache() for _ in self.model.layers]
 
     def _prefill(self, ids: list[int]) -> tuple[list[KVCache], mx.array]:
         if not ids:
@@ -144,12 +146,21 @@ class OptionScorer:
 
     @staticmethod
     def _expand(cache: list[KVCache], n: int) -> list[KVCache]:
+        """Repeat each prefix cache across a batch of n, keeping its type and window state."""
         out = []
         for c in cache:
-            e = KVCache()
-            e.offset = c.offset
-            e.keys = mx.repeat(c.keys, n, axis=0)
-            e.values = mx.repeat(c.values, n, axis=0)
+            e = copy.copy(c)
+            keys, values = c.keys, c.values
+            window = getattr(c, "max_size", None)
+            if window is not None and c.keep == 0 and keys.shape[2] > window:
+                # A RotatingKVCache keeps the whole prefill until its next update trims it.
+                # Trim to the last `window` positions, in time order, before copying so the
+                # batch stays bounded; both update paths (one token or several) accept this.
+                keys = c._temporal_order(keys)[..., -window:, :]
+                values = c._temporal_order(values)[..., -window:, :]
+                e._idx = window
+            e.keys = mx.repeat(keys, n, axis=0)
+            e.values = mx.repeat(values, n, axis=0)
             out.append(e)
         return out
 

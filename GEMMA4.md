@@ -33,9 +33,11 @@ unsupported model type. `pyproject.toml` now requires `mlx-lm>=0.32.0` and `uv.l
   K/V (`model.make_cache()`) and pads the list with `None` for the K/V-sharing layers. open-jev
   used to build one `KVCache` per layer. On E4B that made the sharing layers append the shared
   keys a second time, and the first cached call failed with a shape mismatch.
-  `OptionScorer.new_cache()` now sizes the list from `make_cache()`. It still uses plain
-  `KVCache` objects, as before, so the prefix-expansion code is unchanged. For Gemma 3,
-  `make_cache()` has one entry per layer, so nothing changes there.
+  `OptionScorer.new_cache()` now returns the model's own `make_cache()`: the right number of
+  caches, with a `RotatingKVCache` on sliding-window layers. `_expand()` copies each cache with
+  its type and trims rotating caches to their window first, so the per-option batch copies
+  stay bounded by the window instead of growing with the full context. Scores are unchanged:
+  cached and naive scoring still agree exactly on CPU, for Gemma 3 too.
 - **Chat template.** `context_ids(chat=True)` passes `enable_thinking=False`. Templates that
   don't read the flag (Gemma 3) ignore it.
 - **Opt-in chat for `system_one`.** `system_one(..., chat=None)` now follows the scorer's

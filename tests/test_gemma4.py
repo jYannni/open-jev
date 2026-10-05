@@ -158,6 +158,18 @@ class MLXGemma4Tests(ScoringChecks, unittest.TestCase):
         self.assertEqual(len(self.scorer('e_series').new_cache()), 2)
         self.assertEqual(len(self.scorer('unified').new_cache()), 4)
 
+    def test_expanded_sliding_caches_stay_within_window(self):
+        for name in ('e_series', 'unified'):
+            with self.subTest(model=name):
+                s = self.scorer(name)
+                cache, _ = s._prefill(s.context_ids(CONTEXTS[1] * 3))
+                expanded = s._expand(cache, 4)
+                self.assertEqual([type(c) for c in expanded], [type(c) for c in s.model.make_cache()])
+                for c in expanded:
+                    self.assertEqual(c.keys.shape[0], 4)
+                    if hasattr(c, 'max_size'):
+                        self.assertLessEqual(c.keys.shape[2], c.max_size)
+
     def test_features_match_uncached_forward(self):
         import mlx.core as mx
         import numpy as np
