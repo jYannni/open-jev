@@ -81,6 +81,10 @@ signatures. `OptionScorer.new_cache()` is a new public helper.
 
 ## Tests
 
+```sh
+uv run python -m unittest discover -s tests -p 'test_gemma4.py' -v
+```
+
 `tests/test_gemma4.py` builds tiny random Gemma 4 models in two shapes, E-series (K/V
 sharing, per-layer inputs) and unified (K = V, no sharing). It runs the same checks as the Gemma 3
 tests:
