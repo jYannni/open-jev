@@ -156,7 +156,10 @@ def confidence(probs: list[float]) -> float:
 
 
 # ------------------------------------------------------------------ answer
-def system_one(scorer: OptionScorer, req: SystemOneRequest, model_name: str, norm: str = "sum") -> SystemOneResponse:
+def system_one(scorer: OptionScorer, req: SystemOneRequest, model_name: str, norm: str = "sum",
+               chat: bool | None = None) -> SystemOneResponse:
+    """Answer every question by scoring its labels. ``chat=None`` uses the scorer's own setting
+    (off by default); reasoning models such as Gemma 4 12B need the chat template."""
     answers: dict[str, Any] = {}
     in_tok = out_tok = 0
     for qid, q in req.questions.items():
@@ -166,7 +169,7 @@ def system_one(scorer: OptionScorer, req: SystemOneRequest, model_name: str, nor
             prompt, labels = render_score(req.state, q)
         else:
             prompt, labels = render_noul(req.state, q)
-        res = scorer.score(prompt, labels, norm=norm, chat=False, sep="")
+        res = scorer.score(prompt, labels, norm=norm, chat=chat, sep="")
         probs = [r.probability for r in res]
         in_tok += int(scorer.last_timing["context_tokens"])
         out_tok += int(scorer.last_timing["option_tokens"])

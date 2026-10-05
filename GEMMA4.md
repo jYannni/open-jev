@@ -38,14 +38,19 @@ unsupported model type. `pyproject.toml` now requires `mlx-lm>=0.32.0` and `uv.l
   `make_cache()` has one entry per layer, so nothing changes there.
 - **Chat template.** `context_ids(chat=True)` passes `enable_thinking=False`. Templates that
   don't read the flag (Gemma 3) ignore it.
+- **Opt-in chat for `system_one`.** `system_one(..., chat=None)` now follows the scorer's
+  `chat` setting (off by default) instead of hard-coding `chat=False`. An explicit `chat=`
+  argument overrides it. `openjev serve --chat` turns it on for `/v1/systemone`, and `/health`
+  reports it. `/score` keeps its per-request `chat` field. See "Gemma 4 12B needs chat scoring".
 - **Dependency.** `mlx-lm>=0.32.0` (see above).
 - **Feature norms.** `train` prints and records (`head.json` → `feature_norms`) the mean L2
   norm of context-token and option features. See below.
 
 ## Template details
 
-The benchmark path (`systemone`, `norm="sum"`) calls `score(..., chat=False)`: the context is
-encoded with the tokenizer's own BOS and no chat template, so the template does not affect it.
+By default the benchmark path (`systemone`, `norm="sum"`) scores raw text: the context is
+encoded with the tokenizer's own BOS and no chat template. With a chat scorer
+(`OptionScorer(..., chat=True)` or `serve --chat`) it uses the templates below.
 
 With `chat=True` the Gemma 4 templates render one user turn as:
 
@@ -74,10 +79,33 @@ norms of about 115. I could not measure Gemma 4 norms without weights. The first
 head's effective change scales with the input norm. As a starting point, scale the learning rate
 by `115 / measured_norm` and confirm on validation. This rule of thumb has not been verified on Gemma 4.
 
+## Gemma 4 12B needs chat scoring
+
+Measured on the Mac mini with `mlx-community/gemma-4-12B-it-qat-4bit`. The model itself works:
+`mlx_lm.generate` reasons its way to the correct answer. Raw-text log-probabilities, however,
+are badly distorted:
+
+| Context → option | E4B raw | 12B raw | 12B `--chat` |
+|---|---|---|---|
+| "The capital of France is" → " Paris" (`check`) | −0.025 | −16.25 | — |
+| "What is the capital of France? Answer in one word." → "Paris" | — | −24.87 | −0.000 |
+
+Raw quickstart answers from the 12B were wrong: department `billing` at 0.997, frustration mostly
+"Calm and factual". This matches the OptiQ 12B model card, which warns that cloze-style
+(log-likelihood) scoring underscores this reasoning model. The 12B is benchmarked with
+`OptionScorer(model, chat=True)` or `serve --chat`. Its cached-vs-naive drift (`check`, raw
+text) is similar to E4B's: 0.30 / 0.60 / 1.72 at 6 / 14 / 1501 tokens, 0.36% relative at
+1501 tokens.
+
+Route A feature extraction (`openjev decision`, `openjev features`) still encodes raw text. Hidden
+states are not log-probabilities, so this may matter less there, but it is not verified for the 12B.
+
 ## Benchmark contract
 
-`OptionScorer`, `openjev.systemone.SystemOneRequest` and `system_one` keep their names and
-signatures. `OptionScorer.new_cache()` is a new public helper.
+`OptionScorer` and `openjev.systemone.SystemOneRequest` are unchanged. `system_one` gains an
+optional trailing `chat: bool | None = None` argument. Existing calls behave as before unless the
+scorer was itself built with `chat=True`, which now carries through instead of being ignored.
+`OptionScorer.new_cache()` is a new public helper.
 
 ## Tests
 
@@ -134,8 +162,7 @@ drift matches Gemma 3's.
 
 ## Not verified without weights
 
-- Real-checkpoint loading of the 12B repo (`gemma4_unified`).
-- 12B output on `examples/systemone-quickstart.json`.
+- 12B quickstart output with `--chat`.
 - Feature norms and a working learning rate for Route A.
 - Numerical agreement between MLX 4-bit and PyTorch bf16 on real weights.
 - Gemma 4's 512/1024-token sliding windows with contexts longer than the window, on real
