@@ -113,6 +113,23 @@ there with the K/V-sharing shape mismatch). `examples/systemone-quickstart.json`
 Zero-shot `norm="sum"` probabilities are very sharp. "Furious, harsh wording" is arguably too
 strong for this ticket.
 
+### `openjev check --context-tokens 1500` (cached vs naive, MLX 4-bit on Metal)
+
+| Model | 6-token context | 14-token context | 1501-token context | Result |
+|---|---|---|---|---|
+| `mlx-community/gemma-3-4b-it-4bit` | 0.43 (3.2%) | 0.17 (1.9%) | 0.31 (0.23%) | OK |
+| `mlx-community/gemma-4-e4b-it-4bit` | 0.17 (1.1%) | 0.54 (4.4%) | 2.04 (0.71%) | MISMATCH at tol 0.5 |
+
+The values are the worst absolute log-prob difference per case, with the relative difference in
+brackets. Option rankings are identical between cached and naive in every case for both models.
+On CPU, in float32 and bfloat16, cached and naive agree exactly for tiny Gemma 4 (E-series and
+unified) and Gemma 3 models with a 1602-token context past a 64-token sliding window. The
+difference is therefore attributed to Metal kernel rounding in bfloat16, not to the cache logic.
+That attribution is inferred, not proven on Metal. Gemma 4's drift at long context is about 3×
+Gemma 3's in relative terms, and its option scores are about 2.4× larger. Expect `check` to fail
+its default `--tol 0.5` on Gemma 4 for long contexts. For short labels, as in `systemone`, the
+drift matches Gemma 3's.
+
 ## Not verified without weights
 
 - Real-checkpoint loading of the 12B repo (`gemma4_unified`).
