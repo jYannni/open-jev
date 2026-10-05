@@ -98,11 +98,25 @@ tests:
 The MLX tests run wherever mlx-lm imports. They were run with `mlx[cpu]` 0.32.3 and mlx-lm
 0.32.0 on Linux. The PyTorch tests ran with the locked torch/transformers.
 
+## Verified on real weights (Mac mini, Apple silicon)
+
+`mlx-community/gemma-4-e4b-it-4bit`, mlx-lm 0.32.0: `tests/test_gemma4.py` passes on Metal; the
+server loads the checkpoint and its warm-up scoring call succeeds (unchanged upstream crashes
+there with the K/V-sharing shape mismatch). `examples/systemone-quickstart.json`:
+
+| Question | Answer | Probabilities |
+|---|---|---|
+| department (choice) | technical | billing 1.1e-6, technical 0.999999, sales 6.1e-11 |
+| frustration (score) | 1.98 | 0: 7.4e-5, 1: 0.016, 2: 0.984 |
+| is_urgent (noul) | 0.905 | — |
+
+Zero-shot `norm="sum"` probabilities are very sharp. "Furious, harsh wording" is arguably too
+strong for this ticket.
+
 ## Not verified without weights
 
-- Real-checkpoint loading of either MLX repo, including quantised weights and the
-  `sanitize()` paths for audio and vision weights.
-- Output probabilities on `examples/systemone-quickstart.json`.
+- Real-checkpoint loading of the 12B repo (`gemma4_unified`).
+- 12B output on `examples/systemone-quickstart.json`.
 - Feature norms and a working learning rate for Route A.
 - Numerical agreement between MLX 4-bit and PyTorch bf16 on real weights.
 - Gemma 4's 512/1024-token sliding windows with contexts longer than the window, on real
