@@ -165,7 +165,7 @@ def cmd_check(args: argparse.Namespace) -> None:
 def cmd_serve(args: argparse.Namespace) -> None:
     from .server import serve
 
-    serve(args.host, args.port, args.model, args.batch_size, backend=args.backend, device=args.device)
+    serve(args.host, args.port, args.model, args.batch_size, backend=args.backend, device=args.device, chat=args.chat)
 
 
 def cmd_features(args: argparse.Namespace) -> None:
@@ -269,6 +269,8 @@ def main(argv: list[str] | None = None) -> None:
     v.add_argument("--device", default="auto", help="auto, cpu, cuda, cuda:N, or mps")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8000)
+    v.add_argument("--chat", action="store_true",
+                   help="/v1/systemone scores labels as the reply in the chat template (needed by Gemma 4 12B)")
     v.set_defaults(fn=cmd_serve)
 
     from .decision_cli import register

@@ -26,20 +26,18 @@ class FeatureExtractor:
         self.contextual = contextual
         m = scorer.model
         inner = m.language_model if hasattr(m, "language_model") else m
-        self.core = inner.model  # Gemma3Model: embeddings + layers + final norm, no LM head
+        self.core = inner.model  # Gemma3Model / Gemma4TextModel: embeddings + layers + final norm, no LM head
         self.hidden = inner.args.hidden_size
 
     def extract(self, context: str, options: list[str], chat: bool | None = None, sep: str | None = None):
         """Return (context_h (Lc, H) float16, options_h (N, H) float16)."""
         ctx_ids = self.s.context_ids(context, chat=chat, sep=sep)
         opts = [self.s.option_ids(o) for o in options]
-        from mlx_lm.models.cache import KVCache
-
-        cache = [KVCache() for _ in self.s.model.layers]
+        cache = self.s.new_cache()
         ctx_h = self.core(mx.array(ctx_ids)[None], cache=cache)[0]  # (Lc, H)
         mx.eval(ctx_h, *[c.keys for c in cache], *[c.values for c in cache])
         if not self.contextual:  # options stand alone: prefix is just BOS
-            cache = [KVCache() for _ in self.s.model.layers]
+            cache = self.s.new_cache()
             mx.eval(self.core(mx.array([self.s.bos_id])[None], cache=cache))
 
         pooled = []
@@ -93,6 +91,16 @@ class FeatureSet:
 
     def __len__(self) -> int:
         return len(self.labels)
+
+    def norms(self) -> dict:
+        """Mean L2 norm of context-token and pooled option vectors.
+
+        The default head learning rate was tuned on Gemma 3 4B, whose norms are around
+        115; compare against this when training on another backbone (see GEMMA4.md).
+        """
+        def mean_norm(arrays):
+            return float(np.mean(np.concatenate([np.linalg.norm(a.astype(np.float32), axis=-1) for a in arrays])))
+        return {"context": round(mean_norm(self.ctx), 2), "option": round(mean_norm(self.opt), 2)}
 
     def batch(self, idx: list[int], shuffle_context: bool = False):
         """Pad a batch: returns ctx (B, Lc, H), ctx_mask (B, Lc), opt (B, N, H), opt_mask (B, N), labels (B,)."""

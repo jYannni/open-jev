@@ -42,7 +42,8 @@ class ScoreResponse(BaseModel):
     timing: dict[str, float]
 
 
-def create_app(model_path: str | None = None, batch_size: int = 8, backend: str = "auto", device: str = "auto") -> FastAPI:
+def create_app(model_path: str | None = None, batch_size: int = 8, backend: str = "auto", device: str = "auto",
+               chat: bool = False) -> FastAPI:
     model_path = model_path or os.environ.get("OPENJEV_MODEL", DEFAULT_MODEL)
     adapter_path = os.environ.get("OPENJEV_ADAPTER")  # optional LoRA adapter dir
     app = FastAPI(title="openjev", version="0.1.0")
@@ -57,14 +58,14 @@ def create_app(model_path: str | None = None, batch_size: int = 8, backend: str 
     @app.on_event("startup")
     def _load() -> None:
         t = time.perf_counter()
-        scorer = OptionScorer(model_path, batch_size=batch_size, adapter_path=adapter_path, backend=backend, device=device)
+        scorer = OptionScorer(model_path, batch_size=batch_size, chat=chat, adapter_path=adapter_path, backend=backend, device=device)
         scorer.score("warm up", ["a", "b"])  # compile kernels before the first request
         state["scorer"] = scorer
         state["load_s"] = time.perf_counter() - t
 
     @app.get("/health")
     def health() -> dict:
-        return {"ok": "scorer" in state, "model": model_path, "load_s": state.get("load_s"), "backend": getattr(state.get("scorer"), "backend", None), "device": getattr(state.get("scorer"), "device", None)}
+        return {"ok": "scorer" in state, "model": model_path, "load_s": state.get("load_s"), "backend": getattr(state.get("scorer"), "backend", None), "device": getattr(state.get("scorer"), "device", None), "chat": chat}
 
     @app.post("/score", response_model=ScoreResponse)
     def score(req: ScoreRequest) -> ScoreResponse:
@@ -97,7 +98,8 @@ def create_app(model_path: str | None = None, batch_size: int = 8, backend: str 
     return app
 
 
-def serve(host: str, port: int, model_path: str | None, batch_size: int, backend: str = "auto", device: str = "auto") -> None:
+def serve(host: str, port: int, model_path: str | None, batch_size: int, backend: str = "auto", device: str = "auto",
+          chat: bool = False) -> None:
     import uvicorn
 
-    uvicorn.run(create_app(model_path, batch_size, backend=backend, device=device), host=host, port=port, workers=1)
+    uvicorn.run(create_app(model_path, batch_size, backend=backend, device=device, chat=chat), host=host, port=port, workers=1)

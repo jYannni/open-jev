@@ -1,4 +1,4 @@
-"""Zero-shot option scoring with Gemma 3 via MLX or PyTorch (Route B in docs/design/one-pass-option-scoring.md).
+"""Zero-shot option scoring with Gemma 3 or Gemma 4 via MLX or PyTorch (Route B in docs/design/one-pass-option-scoring.md).
 
 The context is prefilled once. Its KV cache is then expanded across the batch
 dimension so every option is scored in one padded forward pass that shares the
@@ -7,6 +7,7 @@ language model assigns to the option tokens given the context.
 """
 from __future__ import annotations
 
+import copy
 import math
 import time
 from dataclasses import dataclass, asdict
@@ -47,8 +48,9 @@ class OptionScorer:
         backend: auto selects MLX on Apple silicon, PyTorch elsewhere.
         device: PyTorch device (auto, cpu, cuda, cuda:N, mps).
         batch_size: maximum number of options scored in one forward pass.
-        chat: wrap the context in Gemma's chat template (user turn, generation
-            prompt appended) so options are scored as the start of the reply.
+        chat: wrap the context in the model's chat template (user turn, generation
+            prompt appended, thinking disabled) so options are scored as the start
+            of the reply.
         sep: literal string placed between context and each option (ignored
             when ``chat`` is set, since the template already ends the turn).
     """
@@ -101,6 +103,8 @@ class OptionScorer:
                 [{"role": "user", "content": context}],
                 tokenize=False,
                 add_generation_prompt=True,
+                # Gemma 4 templates read this flag; templates without it ignore it.
+                enable_thinking=False,
             )
             ids = self.tok.encode(text, add_special_tokens=False)
             if self.bos_id is not None and ids[:1] != [self.bos_id]:
@@ -118,12 +122,23 @@ class OptionScorer:
         return ids
 
     # --------------------------------------------------------------- prefill
+    def new_cache(self) -> list[KVCache]:
+        """The model's own prompt cache: one entry per layer that owns K/V.
+
+        mlx-lm's ``make_cache`` returns a ``RotatingKVCache`` for sliding-window layers,
+        which keeps memory bounded by the window, and leaves out the K/V-sharing layers
+        of Gemma 4 E-series models (the model pads the list with None for them).
+        """
+        if hasattr(self.model, "make_cache"):
+            return self.model.make_cache()
+        return [KVCache() for _ in self.model.layers]
+
     def _prefill(self, ids: list[int]) -> tuple[list[KVCache], mx.array]:
         if not ids:
             raise ValueError("context must contain tokens (or the tokenizer must define BOS)")
         if self._engine is not None:
             return self._engine.prefill(ids)
-        cache = [KVCache() for _ in self.model.layers]
+        cache = self.new_cache()
         logits = self.model(mx.array(ids)[None], cache=cache)
         last = logits[0, -1]
         mx.eval(last, *[c.keys for c in cache], *[c.values for c in cache])
@@ -131,12 +146,21 @@ class OptionScorer:
 
     @staticmethod
     def _expand(cache: list[KVCache], n: int) -> list[KVCache]:
+        """Repeat each prefix cache across a batch of n, keeping its type and window state."""
         out = []
         for c in cache:
-            e = KVCache()
-            e.offset = c.offset
-            e.keys = mx.repeat(c.keys, n, axis=0)
-            e.values = mx.repeat(c.values, n, axis=0)
+            e = copy.copy(c)
+            keys, values = c.keys, c.values
+            window = getattr(c, "max_size", None)
+            if window is not None and c.keep == 0 and keys.shape[2] > window:
+                # A RotatingKVCache keeps the whole prefill until its next update trims it.
+                # Trim to the last `window` positions, in time order, before copying so the
+                # batch stays bounded; both update paths (one token or several) accept this.
+                keys = c._temporal_order(keys)[..., -window:, :]
+                values = c._temporal_order(values)[..., -window:, :]
+                e._idx = window
+            e.keys = mx.repeat(keys, n, axis=0)
+            e.values = mx.repeat(values, n, axis=0)
             out.append(e)
         return out
 
